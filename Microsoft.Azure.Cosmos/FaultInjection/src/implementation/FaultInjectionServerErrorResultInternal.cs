@@ -653,22 +653,22 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
                     // (e.g. 449 then 408 then a terminal 400); the final entry repeats once exhausted. The
                     // per-rule invocation counter is global (not per-activity-id), so it advances on every retry
                     // regardless of the fresh activity ids the SDK assigns across its inner retry loop.
-                    FaultInjectionDistributedTransactionResponse? dtcSpec;
+                    FaultInjectionDistributedTransactionResponse? selectedDistributedTransactionResponse;
                     if (this.distributedTransactionResponseSequence != null && this.distributedTransactionResponseSequence.Count > 0)
                     {
                         long invocation = System.Threading.Interlocked.Increment(ref this.distributedTransactionResponseSequenceInvocations) - 1;
                         int index = (int)Math.Min(invocation, this.distributedTransactionResponseSequence.Count - 1);
-                        dtcSpec = this.distributedTransactionResponseSequence[index];
+                        selectedDistributedTransactionResponse = this.distributedTransactionResponseSequence[index];
                     }
                     else
                     {
-                        dtcSpec = this.fixedDistributedTransactionResponse;
+                        selectedDistributedTransactionResponse = this.fixedDistributedTransactionResponse;
                     }
 
-                    int dtcStatus = dtcSpec?.StatusCode ?? (int)HttpStatusCode.ServiceUnavailable;
-                    int dtcSubStatus = dtcSpec?.SubStatusCode ?? (int)SubStatusCodes.Unknown;
-                    bool dtcIsRetriable = dtcSpec?.IsRetriable ?? true;
-                    bool dtcEmptyBody = dtcSpec?.EmptyBody ?? false;
+                    int dtcStatus = selectedDistributedTransactionResponse?.StatusCode ?? (int)HttpStatusCode.ServiceUnavailable;
+                    int dtcSubStatus = selectedDistributedTransactionResponse?.SubStatusCode ?? (int)SubStatusCodes.Unknown;
+                    bool dtcIsRetriable = selectedDistributedTransactionResponse?.IsRetriable ?? true;
+                    bool dtcEmptyBody = selectedDistributedTransactionResponse?.EmptyBody ?? false;
 
                     httpResponse = new HttpResponseMessage
                     {
@@ -685,7 +685,7 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
                             : new FaultInjectionHttpContent(
                                 new MemoryStream(
                                     FaultInjectionResponseEncoding.GetBytes(
-                                        BuildDistributedTransactionResponseBody(dtcIsRetriable, dtcSpec?.OperationResults)))),
+                                        BuildDistributedTransactionResponseBody(dtcIsRetriable, selectedDistributedTransactionResponse?.OperationResults)))),
                     };
 
                     this.SetHttpHeaders(httpResponse, headers, isProxyCall);
@@ -697,7 +697,7 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
                             dtcSubStatus.ToString(CultureInfo.InvariantCulture));
                     }
 
-                    if (dtcSpec?.RetryAfter is TimeSpan retryAfter)
+                    if (selectedDistributedTransactionResponse?.RetryAfter is TimeSpan retryAfter)
                     {
                         httpResponse.Headers.Add(
                             HttpConstants.HttpHeaders.RetryAfterInMilliseconds,

@@ -288,7 +288,7 @@ namespace Microsoft.Azure.Cosmos
                     // ensuring it never routes to a read-only region.
                     request.RequestContext.RouteToLocation(
                         this.retryContext.RetryLocationIndex,
-                        this.isDtxRequest ? false : this.retryContext.RetryRequestOnPreferredLocations);
+                        !this.isDtxRequest && this.retryContext.RetryRequestOnPreferredLocations);
                 }
             }
             else if (this.isDtxRequest)
