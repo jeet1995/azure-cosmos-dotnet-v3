@@ -16,8 +16,8 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         private readonly TimeSpan delay;
         private readonly bool suppressServiceRequests;
         private readonly double injectionRate;
-        private readonly FaultInjectionDistributedTransactionResponse? distributedTransactionResponse;
-        private readonly IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponses;
+        private readonly FaultInjectionDistributedTransactionResponse? fixedDistributedTransactionResponse;
+        private readonly IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponseSequence;
 
         /// <summary>
         /// Creates a new FaultInjectionServerErrorResult.
@@ -32,7 +32,7 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
             TimeSpan delay, 
             bool suppressServiceRequests,
             double injectionRate = 1)
-            : this(serverErrorType, times, delay, suppressServiceRequests, injectionRate, distributedTransactionResponse: null)
+            : this(serverErrorType, times, delay, suppressServiceRequests, injectionRate, fixedDistributedTransactionResponse: null)
         {
         }
 
@@ -44,23 +44,23 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         /// <param name="delay">Specifies the injected delay for the server error.</param>
         /// <param name="suppressServiceRequests">Specifies whether service requests should be suppressed.</param>
         /// <param name="injectionRate">Specifies the percentage of how many times the rule will be applied.</param>
-        /// <param name="distributedTransactionResponse">The coordinator response to inject for <see cref="FaultInjectionServerErrorType.DistributedTransactionCoordinatorError"/>.</param>
+        /// <param name="fixedDistributedTransactionResponse">The coordinator response to inject for <see cref="FaultInjectionServerErrorType.DistributedTransactionCoordinatorError"/>.</param>
         public FaultInjectionServerErrorResult(
             FaultInjectionServerErrorType serverErrorType,
             int times,
             TimeSpan delay,
             bool suppressServiceRequests,
             double injectionRate,
-            FaultInjectionDistributedTransactionResponse? distributedTransactionResponse,
-            IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponses = null)
+            FaultInjectionDistributedTransactionResponse? fixedDistributedTransactionResponse,
+            IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponseSequence = null)
         {
             this.serverErrorType = serverErrorType;
             this.times = times;
             this.delay = delay;
             this.suppressServiceRequests = suppressServiceRequests;
             this.injectionRate = injectionRate;
-            this.distributedTransactionResponse = distributedTransactionResponse;
-            this.distributedTransactionResponses = distributedTransactionResponses;
+            this.fixedDistributedTransactionResponse = fixedDistributedTransactionResponse;
+            this.distributedTransactionResponseSequence = distributedTransactionResponseSequence;
         }
 
         /// <summary>
@@ -115,9 +115,9 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         /// Gets the distributed-transaction coordinator response to inject, or <c>null</c> when none was specified.
         /// </summary>
         /// <returns>the <see cref="FaultInjectionDistributedTransactionResponse"/> or <c>null</c>.</returns>
-        public FaultInjectionDistributedTransactionResponse? GetDistributedTransactionResponse()
+        public FaultInjectionDistributedTransactionResponse? GetFixedDistributedTransactionResponse()
         {
-            return this.distributedTransactionResponse;
+            return this.fixedDistributedTransactionResponse;
         }
 
         /// <summary>
@@ -125,9 +125,9 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         /// successive attempts (the final entry repeats), or <c>null</c> when only a single response was set.
         /// </summary>
         /// <returns>the response sequence or <c>null</c>.</returns>
-        public IReadOnlyList<FaultInjectionDistributedTransactionResponse>? GetDistributedTransactionResponses()
+        public IReadOnlyList<FaultInjectionDistributedTransactionResponse>? GetDistributedTransactionResponseSequence()
         {
-            return this.distributedTransactionResponses;
+            return this.distributedTransactionResponseSequence;
         }
 
         /// <summary>

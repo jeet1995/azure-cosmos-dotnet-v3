@@ -94,7 +94,7 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         /// <summary>
         /// Injects a synthesized distributed-transaction coordinator error response. The injected envelope
         /// can be any documented coordinator outcome — retriable or terminal — described by
-        /// <see cref="FaultInjectionServerErrorResultBuilder.WithDistributedTransactionResponse"/>
+        /// <see cref="FaultInjectionServerErrorResultBuilder.WithFixedDistributedTransactionResponse"/>
         /// (status / sub-status, per-operation results, and the body <c>isRetriable</c> flag).
         /// Only supported for <see cref="FaultInjectionOperationType.DistributedReadTransaction"/>
         /// and <see cref="FaultInjectionOperationType.DistributedWriteTransaction"/> operation types.

@@ -17,8 +17,8 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         private bool suppressServiceRequest;
         private bool isDelaySet = false;
         private double injectionRate = 1;
-        private FaultInjectionDistributedTransactionResponse? distributedTransactionResponse;
-        private IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponses;
+        private FaultInjectionDistributedTransactionResponse? fixedDistributedTransactionResponse;
+        private IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponseSequence;
 
         /// <summary>
         /// Creates a <see cref="FaultInjectionServerErrorResult"/>.
@@ -98,15 +98,18 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         }
 
         /// <summary>
-        /// Sets the distributed-transaction coordinator response to inject. Only applicable to
+        /// Sets a single FIXED distributed-transaction coordinator response that is injected on every
+        /// matched attempt (the same response each time). Only applicable to
         /// <see cref="FaultInjectionServerErrorType.DistributedTransactionCoordinatorError"/>; lets a rule
         /// reproduce any documented DTC envelope outcome (status, sub-status, <c>isRetriable</c>,
-        /// retry-after, and per-operation results).
+        /// retry-after, and per-operation results). Use
+        /// <see cref="WithDistributedTransactionResponseSequence"/> instead when the response must change
+        /// across successive attempts.
         /// </summary>
-        /// <param name="distributedTransactionResponse">The coordinator response specification.</param>
+        /// <param name="fixedDistributedTransactionResponse">The coordinator response specification.</param>
         /// <returns>The current <see cref="FaultInjectionServerErrorResultBuilder"/>.</returns>
-        public FaultInjectionServerErrorResultBuilder WithDistributedTransactionResponse(
-            FaultInjectionDistributedTransactionResponse distributedTransactionResponse)
+        public FaultInjectionServerErrorResultBuilder WithFixedDistributedTransactionResponse(
+            FaultInjectionDistributedTransactionResponse fixedDistributedTransactionResponse)
         {
             if (this.serverErrorType != FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
             {
@@ -115,8 +118,8 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
                     $"'{FaultInjectionServerErrorType.DistributedTransactionCoordinatorError}', but the current type is '{this.serverErrorType}'.");
             }
 
-            this.distributedTransactionResponse = distributedTransactionResponse
-                ?? throw new ArgumentNullException(nameof(distributedTransactionResponse));
+            this.fixedDistributedTransactionResponse = fixedDistributedTransactionResponse
+                ?? throw new ArgumentNullException(nameof(fixedDistributedTransactionResponse));
             return this;
         }
 
@@ -130,7 +133,7 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         /// </summary>
         /// <param name="responses">The ordered, non-empty response sequence.</param>
         /// <returns>The current <see cref="FaultInjectionServerErrorResultBuilder"/>.</returns>
-        public FaultInjectionServerErrorResultBuilder WithDistributedTransactionResponses(
+        public FaultInjectionServerErrorResultBuilder WithDistributedTransactionResponseSequence(
             IReadOnlyList<FaultInjectionDistributedTransactionResponse> responses)
         {
             if (this.serverErrorType != FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
@@ -158,7 +161,7 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
                 }
             }
 
-            this.distributedTransactionResponses = responses;
+            this.distributedTransactionResponseSequence = responses;
             return this;
         }
 
@@ -182,8 +185,8 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
                 this.delay,
                 this.suppressServiceRequest,
                 this.injectionRate,
-                this.distributedTransactionResponse,
-                this.distributedTransactionResponses);
+                this.fixedDistributedTransactionResponse,
+                this.distributedTransactionResponseSequence);
         }
     }
 }

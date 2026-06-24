@@ -774,7 +774,7 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
             FaultInjectionServerErrorResultBuilder resultBuilder = FaultInjectionResultBuilder
                 .GetResultBuilder(FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
                 .WithSuppressServiceRequest(suppressServiceRequest)
-                .WithFixedDistributedTransactionResponse(coordinatorResponse);
+                .WithDistributedTransactionResponse(coordinatorResponse);
 
             if (times > 0)
             {
@@ -808,7 +808,7 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
             FaultInjectionServerErrorResultBuilder resultBuilder = FaultInjectionResultBuilder
                 .GetResultBuilder(FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
                 .WithSuppressServiceRequest(suppressServiceRequest)
-                .WithDistributedTransactionResponseSequence(responses);
+                .WithDistributedTransactionResponses(responses);
 
             if (times > 0)
             {

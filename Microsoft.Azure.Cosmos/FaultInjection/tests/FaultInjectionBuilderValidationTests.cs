@@ -177,8 +177,8 @@ namespace Microsoft.Azure.Cosmos.FaultInjection.Tests
         }
 
         [TestMethod]
-        [Description("WithDistributedTransactionResponse round-trips the coordinator response spec onto the result.")]
-        public void ServerErrorResultBuilder_WithDistributedTransactionResponse_RoundTrips()
+        [Description("WithFixedDistributedTransactionResponse round-trips the coordinator response spec onto the result.")]
+        public void ServerErrorResultBuilder_WithFixedDistributedTransactionResponse_RoundTrips()
         {
             FaultInjectionDistributedTransactionResponse spec = new FaultInjectionDistributedTransactionResponse(
                 statusCode: 449,
@@ -192,14 +192,14 @@ namespace Microsoft.Azure.Cosmos.FaultInjection.Tests
 
             FaultInjectionServerErrorResult result = FaultInjectionResultBuilder
                 .GetResultBuilder(FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
-                .WithDistributedTransactionResponse(spec)
+                .WithFixedDistributedTransactionResponse(spec)
                 .Build();
 
-            Assert.AreSame(spec, result.GetDistributedTransactionResponse());
-            Assert.AreEqual(449, result.GetDistributedTransactionResponse().StatusCode);
-            Assert.IsTrue(result.GetDistributedTransactionResponse().IsRetriable);
-            Assert.AreEqual(1, result.GetDistributedTransactionResponse().OperationResults.Count);
-            Assert.AreEqual(453, result.GetDistributedTransactionResponse().OperationResults[0].StatusCode);
+            Assert.AreSame(spec, result.GetFixedDistributedTransactionResponse());
+            Assert.AreEqual(449, result.GetFixedDistributedTransactionResponse().StatusCode);
+            Assert.IsTrue(result.GetFixedDistributedTransactionResponse().IsRetriable);
+            Assert.AreEqual(1, result.GetFixedDistributedTransactionResponse().OperationResults.Count);
+            Assert.AreEqual(453, result.GetFixedDistributedTransactionResponse().OperationResults[0].StatusCode);
         }
 
         [TestMethod]
@@ -210,12 +210,12 @@ namespace Microsoft.Azure.Cosmos.FaultInjection.Tests
                 .GetResultBuilder(FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
                 .Build();
 
-            Assert.IsNull(result.GetDistributedTransactionResponse());
+            Assert.IsNull(result.GetFixedDistributedTransactionResponse());
         }
 
         [TestMethod]
-        [Description("WithDistributedTransactionResponse is rejected for a non-DistributedTransactionCoordinatorError error type.")]
-        public void ServerErrorResultBuilder_WithDistributedTransactionResponse_WrongErrorType_Throws()
+        [Description("WithFixedDistributedTransactionResponse is rejected for a non-DistributedTransactionCoordinatorError error type.")]
+        public void ServerErrorResultBuilder_WithFixedDistributedTransactionResponse_WrongErrorType_Throws()
         {
             FaultInjectionDistributedTransactionResponse spec =
                 new FaultInjectionDistributedTransactionResponse(statusCode: 503, isRetriable: true);
@@ -223,22 +223,22 @@ namespace Microsoft.Azure.Cosmos.FaultInjection.Tests
             Assert.ThrowsException<InvalidOperationException>(() =>
                 FaultInjectionResultBuilder
                     .GetResultBuilder(FaultInjectionServerErrorType.ServiceUnavailable)
-                    .WithDistributedTransactionResponse(spec));
+                    .WithFixedDistributedTransactionResponse(spec));
         }
 
         [TestMethod]
-        [Description("WithDistributedTransactionResponse rejects a null spec.")]
-        public void ServerErrorResultBuilder_WithDistributedTransactionResponse_Null_Throws()
+        [Description("WithFixedDistributedTransactionResponse rejects a null spec.")]
+        public void ServerErrorResultBuilder_WithFixedDistributedTransactionResponse_Null_Throws()
         {
             Assert.ThrowsException<ArgumentNullException>(() =>
                 FaultInjectionResultBuilder
                     .GetResultBuilder(FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
-                    .WithDistributedTransactionResponse(null));
+                    .WithFixedDistributedTransactionResponse(null));
         }
 
         [TestMethod]
-        [Description("WithDistributedTransactionResponses round-trips an ordered sequence through the result getter.")]
-        public void ServerErrorResultBuilder_WithDistributedTransactionResponses_RoundTrips()
+        [Description("WithDistributedTransactionResponseSequence round-trips an ordered sequence through the result getter.")]
+        public void ServerErrorResultBuilder_WithDistributedTransactionResponseSequence_RoundTrips()
         {
             FaultInjectionDistributedTransactionResponse[] sequence = new[]
             {
@@ -248,18 +248,18 @@ namespace Microsoft.Azure.Cosmos.FaultInjection.Tests
 
             FaultInjectionServerErrorResult result = FaultInjectionResultBuilder
                 .GetResultBuilder(FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
-                .WithDistributedTransactionResponses(sequence)
+                .WithDistributedTransactionResponseSequence(sequence)
                 .Build();
 
-            Assert.IsNotNull(result.GetDistributedTransactionResponses());
-            Assert.AreEqual(2, result.GetDistributedTransactionResponses().Count);
-            Assert.AreEqual(449, result.GetDistributedTransactionResponses()[0].StatusCode);
-            Assert.AreEqual(408, result.GetDistributedTransactionResponses()[1].StatusCode);
+            Assert.IsNotNull(result.GetDistributedTransactionResponseSequence());
+            Assert.AreEqual(2, result.GetDistributedTransactionResponseSequence().Count);
+            Assert.AreEqual(449, result.GetDistributedTransactionResponseSequence()[0].StatusCode);
+            Assert.AreEqual(408, result.GetDistributedTransactionResponseSequence()[1].StatusCode);
         }
 
         [TestMethod]
-        [Description("WithDistributedTransactionResponses is rejected for a non-DistributedTransactionCoordinatorError error type.")]
-        public void ServerErrorResultBuilder_WithDistributedTransactionResponses_WrongErrorType_Throws()
+        [Description("WithDistributedTransactionResponseSequence is rejected for a non-DistributedTransactionCoordinatorError error type.")]
+        public void ServerErrorResultBuilder_WithDistributedTransactionResponseSequence_WrongErrorType_Throws()
         {
             FaultInjectionDistributedTransactionResponse[] sequence = new[]
             {
@@ -269,27 +269,27 @@ namespace Microsoft.Azure.Cosmos.FaultInjection.Tests
             Assert.ThrowsException<InvalidOperationException>(() =>
                 FaultInjectionResultBuilder
                     .GetResultBuilder(FaultInjectionServerErrorType.ServiceUnavailable)
-                    .WithDistributedTransactionResponses(sequence));
+                    .WithDistributedTransactionResponseSequence(sequence));
         }
 
         [TestMethod]
-        [Description("WithDistributedTransactionResponses rejects a null sequence.")]
-        public void ServerErrorResultBuilder_WithDistributedTransactionResponses_Null_Throws()
+        [Description("WithDistributedTransactionResponseSequence rejects a null sequence.")]
+        public void ServerErrorResultBuilder_WithDistributedTransactionResponseSequence_Null_Throws()
         {
             Assert.ThrowsException<ArgumentNullException>(() =>
                 FaultInjectionResultBuilder
                     .GetResultBuilder(FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
-                    .WithDistributedTransactionResponses(null));
+                    .WithDistributedTransactionResponseSequence(null));
         }
 
         [TestMethod]
-        [Description("WithDistributedTransactionResponses rejects an empty sequence.")]
-        public void ServerErrorResultBuilder_WithDistributedTransactionResponses_Empty_Throws()
+        [Description("WithDistributedTransactionResponseSequence rejects an empty sequence.")]
+        public void ServerErrorResultBuilder_WithDistributedTransactionResponseSequence_Empty_Throws()
         {
             Assert.ThrowsException<ArgumentException>(() =>
                 FaultInjectionResultBuilder
                     .GetResultBuilder(FaultInjectionServerErrorType.DistributedTransactionCoordinatorError)
-                    .WithDistributedTransactionResponses(Array.Empty<FaultInjectionDistributedTransactionResponse>()));
+                    .WithDistributedTransactionResponseSequence(Array.Empty<FaultInjectionDistributedTransactionResponse>()));
         }
 
         #endregion

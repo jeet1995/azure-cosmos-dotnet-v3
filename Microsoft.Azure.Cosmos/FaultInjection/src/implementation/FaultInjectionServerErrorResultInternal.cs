@@ -25,9 +25,9 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         private readonly double injectionRate;
         private readonly FaultInjectionApplicationContext applicationContext;
         private readonly GlobalEndpointManager globalEndpointManager;
-        private readonly FaultInjectionDistributedTransactionResponse? distributedTransactionResponse;
-        private readonly IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponses;
-        private long distributedTransactionResponseInvocations;
+        private readonly FaultInjectionDistributedTransactionResponse? fixedDistributedTransactionResponse;
+        private readonly IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponseSequence;
+        private long distributedTransactionResponseSequenceInvocations;
 
         /// <summary>
         /// Constructor for FaultInjectionServerErrorResultInternal
@@ -38,7 +38,7 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
         /// <param name="injectionRate"></param>
         /// <param name="applicationContext"></param>
         /// <param name="globalEndpointManager"></param>
-        /// <param name="distributedTransactionResponse"></param>
+        /// <param name="fixedDistributedTransactionResponse"></param>
         public FaultInjectionServerErrorResultInternal(
             FaultInjectionServerErrorType serverErrorType,
             int times,
@@ -47,8 +47,8 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
             double injectionRate,
             FaultInjectionApplicationContext applicationContext,
             GlobalEndpointManager globalEndpointManager,
-            FaultInjectionDistributedTransactionResponse? distributedTransactionResponse = null,
-            IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponses = null)
+            FaultInjectionDistributedTransactionResponse? fixedDistributedTransactionResponse = null,
+            IReadOnlyList<FaultInjectionDistributedTransactionResponse>? distributedTransactionResponseSequence = null)
         {
             this.serverErrorType = serverErrorType;
             this.times = times;
@@ -57,8 +57,8 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
             this.injectionRate = injectionRate;
             this.applicationContext = applicationContext;
             this.globalEndpointManager = globalEndpointManager;
-            this.distributedTransactionResponse = distributedTransactionResponse;
-            this.distributedTransactionResponses = distributedTransactionResponses;
+            this.fixedDistributedTransactionResponse = fixedDistributedTransactionResponse;
+            this.distributedTransactionResponseSequence = distributedTransactionResponseSequence;
         }
 
         /// <summary>
@@ -648,21 +648,21 @@ namespace Microsoft.Azure.Cosmos.FaultInjection
                     // otherwise fall back to the generic retriable shape (503 + {"isRetriable":true}) so the
                     // committer's outer retry loop both observes IsRetriable=true and a non-success status.
                     //
-                    // When a response SEQUENCE is supplied (WithDistributedTransactionResponses), successive
+                    // When a response SEQUENCE is supplied (WithDistributedTransactionResponseSequence), successive
                     // injections walk the sequence so each retry attempt can surface a DIFFERENT envelope code
                     // (e.g. 449 then 408 then a terminal 400); the final entry repeats once exhausted. The
                     // per-rule invocation counter is global (not per-activity-id), so it advances on every retry
                     // regardless of the fresh activity ids the SDK assigns across its inner retry loop.
                     FaultInjectionDistributedTransactionResponse? dtcSpec;
-                    if (this.distributedTransactionResponses != null && this.distributedTransactionResponses.Count > 0)
+                    if (this.distributedTransactionResponseSequence != null && this.distributedTransactionResponseSequence.Count > 0)
                     {
-                        long invocation = System.Threading.Interlocked.Increment(ref this.distributedTransactionResponseInvocations) - 1;
-                        int index = (int)Math.Min(invocation, this.distributedTransactionResponses.Count - 1);
-                        dtcSpec = this.distributedTransactionResponses[index];
+                        long invocation = System.Threading.Interlocked.Increment(ref this.distributedTransactionResponseSequenceInvocations) - 1;
+                        int index = (int)Math.Min(invocation, this.distributedTransactionResponseSequence.Count - 1);
+                        dtcSpec = this.distributedTransactionResponseSequence[index];
                     }
                     else
                     {
-                        dtcSpec = this.distributedTransactionResponse;
+                        dtcSpec = this.fixedDistributedTransactionResponse;
                     }
 
                     int dtcStatus = dtcSpec?.StatusCode ?? (int)HttpStatusCode.ServiceUnavailable;
