@@ -29,7 +29,7 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
     [TestClass]
     [DoNotParallelize]
     [TestCategory("DistributedTransaction")]
-    public class DistributedTransactionTests : BaseCosmosClientHelper
+    public class DistributedWriteTransactionTests : BaseCosmosClientHelper
     {
         private const string IdempotencyTokenHeader = HttpConstants.HttpHeaders.IdempotencyToken;
         private const string PartitionKeyPath = "/pk";
@@ -789,151 +789,120 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
             response.Dispose();
         }
 
-        // Read Transaction Tests
+        // Session token handling
 
         [TestMethod]
-        public async Task ValidateReadTransactionHappyPath()
+        [Description("When DTC response carries a session token in the new wire format (LSN-only sessionToken + " +
+            "separate partitionKeyRangeId), the SDK assembles the canonical {pkRangeId}:{lsn} token and merges it " +
+            "into the session container so that subsequent Session-consistency reads succeed.")]
+        public async Task ValidateSessionTokenMergedIntoDtcClient()
         {
-            // Arrange
-            ToDoActivity doc1 = ToDoActivity.CreateRandomToDoActivity();
-            ToDoActivity doc2 = ToDoActivity.CreateRandomToDoActivity();
+            ToDoActivity seedDoc = ToDoActivity.CreateRandomToDoActivity();
+            ItemResponse<ToDoActivity> seedResponse = await this.container.CreateItemAsync(seedDoc, new PartitionKey(seedDoc.pk), cancellationToken: this.cancellationToken);
+
+            string canonicalToken = seedResponse.Headers.Session;
+            Assert.IsFalse(string.IsNullOrEmpty(canonicalToken), "A valid session token must be obtained from the emulator for this test to be meaningful.");
+
+            // Split the canonical {pkRangeId}:{lsn} token into the two fields the DTC endpoint sends.
+            int colonIndex = canonicalToken.IndexOf(':');
+            Assert.IsTrue(colonIndex > 0, $"Emulator session token '{canonicalToken}' must be in {{pkRangeId}}:{{lsn}} format.");
+            string pkRangeId = canonicalToken.Substring(0, colonIndex);
+            string lsnOnly = canonicalToken.Substring(colonIndex + 1);
+
+            // Build a DTC mock response using the new wire contract: LSN-only in sessionToken,
+            // pkRangeId in a separate partitionKeyRangeId field.
+            string dtcMockResponse = $@"{{""operationResponses"":[{{""index"":0,""statusCode"":201,""sessionToken"":""{lsnOnly}"",""partitionKeyRangeId"":""{pkRangeId}""}}]}}";
 
             DistributedTransactionMockHandler handler = new DistributedTransactionMockHandler(
-                request => Task.FromResult(this.BuildMockResponse(
-                    HttpStatusCode.OK,
-                    BuildReadSuccessResponseJson(2, JsonSerializer.Serialize(doc1), JsonSerializer.Serialize(doc2)))));
+                request => Task.FromResult(this.BuildMockResponse(HttpStatusCode.OK, dtcMockResponse)));
 
-            using CosmosClient client = this.CreateMockClient(handler);
+            using CosmosClient dtcClient = TestCommon.CreateCosmosClient(
+                clientOptions: new CosmosClientOptions
+                {
+                    CustomHandlers = { handler },
+                    ConnectionMode = ConnectionMode.Gateway,
+                    ConsistencyLevel = Cosmos.ConsistencyLevel.Session,
+                });
 
-            // Act
-            DistributedTransactionResponse response = await client
-                .CreateDistributedReadTransaction()
-                .ReadItem(this.GetContainerForClient(client, this.container), new PartitionKey(doc1.pk), doc1.id)
-                .ReadItem(this.GetContainerForClient(client, this.container), new PartitionKey(doc2.pk), doc2.id)
-                .CommitTransactionAsync(CancellationToken.None);
+            // Use the same partition key as seedDoc so the DTC operation targets the same physical
+            // partition whose session token is carried in the mock response.
+            ToDoActivity newDoc = ToDoActivity.CreateRandomToDoActivity(pk: seedDoc.pk);
+            DistributedTransactionResponse dtcResponse = await dtcClient
+                .CreateDistributedWriteTransaction()
+                .CreateItem(this.GetContainerForClient(dtcClient, this.container), new PartitionKey(newDoc.pk), newDoc.id, newDoc)
+                .CommitTransactionAsync(this.cancellationToken);
 
-            // Assert
-            Assert.IsNotNull(handler.CapturedRequestBody);
-            Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
-            Assert.IsTrue(response.IsSuccessStatusCode);
-            Assert.AreEqual(2, response.Count);
+            Assert.IsTrue(dtcResponse.IsSuccessStatusCode, "The simulated DTC commit should appear successful to the client.");
+            Assert.AreEqual(canonicalToken, dtcResponse[0].SessionToken,
+                "SessionToken must be assembled as {pkRangeId}:{lsn} from the two separate wire fields.");
 
-            response.Dispose();
+            Container dtcContainer = dtcClient.GetContainer(this.database.Id, this.container.Id);
+            try
+            {
+                ItemResponse<ToDoActivity> readResponse = await dtcContainer.ReadItemAsync<ToDoActivity>(
+                    seedDoc.id,
+                    new PartitionKey(seedDoc.pk),
+                    new ItemRequestOptions { ConsistencyLevel = Cosmos.ConsistencyLevel.Session },
+                    cancellationToken: this.cancellationToken);
+
+                Assert.AreEqual(HttpStatusCode.OK, readResponse.StatusCode, "A Session-consistency read after a DTC commit should return 200 OK.");
+            }
+            catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+            {
+                Assert.AreNotEqual(
+                    (int)SubStatusCodes.ReadSessionNotAvailable,
+                    ex.SubStatusCode,
+                    "A Session-consistency read after a DTC commit must not fail with " +
+                    "ReadSessionNotAvailable (404/1002). This indicates that session token " +
+                    "merging in DistributedTransactionCommitter is broken.");
+            }
         }
 
         [TestMethod]
-        public async Task ValidateReadTransactionRequestStructure()
+        [Description("When DTC response carries only an LSN-only sessionToken with no partitionKeyRangeId " +
+            "(current server behavior before coordinator update), the commit must succeed without throwing " +
+            "and the SDK silently skips merging the session token rather than crashing.")]
+        // TODO(issue#5857): Remove this test once the coordinator is updated to emit partitionKeyRangeId and the SDK no longer needs to handle its absence.
+        public async Task ValidateSessionTokenSkipped_WhenPartitionKeyRangeIdAbsent()
         {
-            // Arrange
-            ToDoActivity doc = ToDoActivity.CreateRandomToDoActivity();
+            ToDoActivity seedDoc = ToDoActivity.CreateRandomToDoActivity();
+            ItemResponse<ToDoActivity> seedResponse = await this.container.CreateItemAsync(seedDoc, new PartitionKey(seedDoc.pk), cancellationToken: this.cancellationToken);
+
+            string canonicalToken = seedResponse.Headers.Session;
+            Assert.IsFalse(string.IsNullOrEmpty(canonicalToken), "A valid session token must be obtained from the emulator.");
+            int colonIndex = canonicalToken.IndexOf(':');
+            Assert.IsTrue(colonIndex > 0, $"Emulator session token '{canonicalToken}' must be in {{pkRangeId}}:{{lsn}} format.");
+            string lsnOnly = canonicalToken.Substring(colonIndex + 1);
+
+            // Current server behavior: LSN-only token, no partitionKeyRangeId field.
+            string dtcMockResponse = $@"{{""operationResponses"":[{{""index"":0,""statusCode"":201,""sessionToken"":""{lsnOnly}""}}]}}";
 
             DistributedTransactionMockHandler handler = new DistributedTransactionMockHandler(
-                request => Task.FromResult(this.BuildMockResponse(
-                    HttpStatusCode.OK,
-                    BuildReadSuccessResponseJson(1, JsonSerializer.Serialize(doc)))));
+                request => Task.FromResult(this.BuildMockResponse(HttpStatusCode.OK, dtcMockResponse)));
 
-            using CosmosClient client = this.CreateMockClient(handler);
+            using CosmosClient dtcClient = TestCommon.CreateCosmosClient(
+                clientOptions: new CosmosClientOptions
+                {
+                    CustomHandlers = { handler },
+                    ConnectionMode = ConnectionMode.Gateway,
+                    ConsistencyLevel = Cosmos.ConsistencyLevel.Session,
+                });
 
-            // Act
-            DistributedTransactionResponse response = await client
-                .CreateDistributedReadTransaction()
-                .ReadItem(this.GetContainerForClient(client, this.container), new PartitionKey(doc.pk), doc.id)
-                .CommitTransactionAsync(CancellationToken.None);
+            // Use the same partition key as seedDoc for consistency.
+            ToDoActivity newDoc = ToDoActivity.CreateRandomToDoActivity(pk: seedDoc.pk);
+            DistributedTransactionResponse dtcResponse = await dtcClient
+                .CreateDistributedWriteTransaction()
+                .CreateItem(this.GetContainerForClient(dtcClient, this.container), new PartitionKey(newDoc.pk), newDoc.id, newDoc)
+                .CommitTransactionAsync(this.cancellationToken);
 
-            // Assert – request structure
-            Assert.IsNotNull(handler.CapturedRequestBody);
-            using JsonDocument requestJson = JsonDocument.Parse(handler.CapturedRequestBody);
-            JsonElement operation = requestJson.RootElement.GetProperty(DistributedTransactionSerializer.Operations)[0];
+            // Commit must succeed — this was the crash point before the fix (IndexOutOfRangeException
+            // in SessionContainer.SetSessionToken when it tried tokenParts[1] on an LSN-only token).
+            Assert.IsTrue(dtcResponse.IsSuccessStatusCode, "Commit must succeed even when partitionKeyRangeId is absent.");
 
-            Assert.AreEqual(OperationType.Read.ToString(), operation.GetProperty(DistributedTransactionSerializer.OperationType).GetString());
-            Assert.AreEqual(doc.id, operation.GetProperty(DistributedTransactionSerializer.Id).GetString());
-            Assert.IsTrue(operation.TryGetProperty(DistributedTransactionSerializer.DatabaseName, out _), "databaseName should be present");
-            Assert.IsTrue(operation.TryGetProperty(DistributedTransactionSerializer.CollectionName, out _), "collectionName should be present");
-            Assert.IsTrue(operation.TryGetProperty(DistributedTransactionSerializer.PartitionKey, out _), "partitionKey should be present");
-            Assert.IsFalse(operation.TryGetProperty(DistributedTransactionSerializer.ResourceBody, out _), "resourceBody must NOT be present for read operations");
-
-            response.Dispose();
-        }
-
-        [TestMethod]
-        public async Task ValidateReadTransactionResponseDeserialization()
-        {
-            // Arrange
-            ToDoActivity expectedDoc = ToDoActivity.CreateRandomToDoActivity();
-
-            DistributedTransactionMockHandler handler = new DistributedTransactionMockHandler(
-                request => Task.FromResult(this.BuildMockResponse(
-                    HttpStatusCode.OK,
-                    BuildReadSuccessResponseJson(1, JsonSerializer.Serialize(expectedDoc)))));
-
-            using CosmosClient client = this.CreateMockClient(handler);
-
-            // Act
-            DistributedTransactionResponse response = await client
-                .CreateDistributedReadTransaction()
-                .ReadItem(this.GetContainerForClient(client, this.container), new PartitionKey(expectedDoc.pk), expectedDoc.id)
-                .CommitTransactionAsync(CancellationToken.None);
-
-            // Assert
-            Assert.IsTrue(response.IsSuccessStatusCode);
-            ToDoActivity actualDoc = JsonSerializer.Deserialize<ToDoActivity>(response[0].ResourceStream);
-            Assert.IsNotNull(actualDoc);
-            Assert.AreEqual(expectedDoc.id, actualDoc.id);
-            Assert.AreEqual(expectedDoc.pk, actualDoc.pk);
-            Assert.AreEqual(expectedDoc.taskNum, actualDoc.taskNum);
-
-            response.Dispose();
-        }
-
-        [TestMethod]
-        public async Task ValidateReadTransactionResourceStream()
-        {
-            // Arrange
-            ToDoActivity expectedDoc = ToDoActivity.CreateRandomToDoActivity();
-
-            DistributedTransactionMockHandler handler = new DistributedTransactionMockHandler(
-                request => Task.FromResult(this.BuildMockResponse(
-                    HttpStatusCode.OK,
-                    BuildReadSuccessResponseJson(1, JsonSerializer.Serialize(expectedDoc)))));
-
-            using CosmosClient client = this.CreateMockClient(handler);
-
-            // Act
-            DistributedTransactionResponse response = await client
-                .CreateDistributedReadTransaction()
-                .ReadItem(this.GetContainerForClient(client, this.container), new PartitionKey(expectedDoc.pk), expectedDoc.id)
-                .CommitTransactionAsync(CancellationToken.None);
-
-            // Assert – raw stream access
-            Stream stream = response[0].ResourceStream;
-            Assert.IsNotNull(stream);
-            ToDoActivity actualDoc = JsonSerializer.Deserialize<ToDoActivity>(stream);
-            Assert.AreEqual(expectedDoc.id, actualDoc.id);
-            Assert.AreEqual(expectedDoc.pk, actualDoc.pk);
-
-            response.Dispose();
-        }
-
-        [TestMethod]
-        public void ValidateReadTransactionMissingIdThrows()
-        {
-            using CosmosClient client = this.CreateMockClient(new DistributedTransactionMockHandler(
-                request => Task.FromResult(this.BuildMockResponse(HttpStatusCode.OK, BuildSuccessResponseJson(1)))));
-
-            Assert.ThrowsException<ArgumentNullException>(() =>
-                client.CreateDistributedReadTransaction()
-                    .ReadItem(this.GetContainerForClient(client, this.container), new PartitionKey("pk"), id: null));
-        }
-
-        [TestMethod]
-        public void ValidateReadTransactionMissingContainerThrows()
-        {
-            using CosmosClient client = this.CreateMockClient(new DistributedTransactionMockHandler(
-                request => Task.FromResult(this.BuildMockResponse(HttpStatusCode.OK, BuildSuccessResponseJson(1)))));
-
-            Assert.ThrowsException<ArgumentNullException>(() =>
-                client.CreateDistributedReadTransaction()
-                    .ReadItem(null, new PartitionKey("pk"), "item-id"));
+            // Session token must be null — FromJson nulls it out when pkRangeId is absent so that
+            // MergeSessionTokens skips the operation rather than passing a bad token to SetSessionToken.
+            Assert.IsNull(dtcResponse[0].SessionToken,
+                "SessionToken must be null when partitionKeyRangeId is absent; the SDK silently skips merging.");
         }
 
         // Fault injection: wire-contract + retry-flow coverage for the full DTX SDK response catalog.
@@ -1047,18 +1016,6 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
             for (int i = 0; i < operationCount; i++)
             {
                 results.Add($@"{{""index"":{i},""statusCode"":201,""etag"":""\""etag-{i}\""""}}");
-            }
-
-            return $@"{{""operationResponses"":[{string.Join(",", results)}]}}";
-        }
-
-        private static string BuildReadSuccessResponseJson(int operationCount, params string[] itemJsonBodies)
-        {
-            List<string> results = new List<string>();
-            for (int i = 0; i < operationCount; i++)
-            {
-                string body = i < itemJsonBodies.Length ? itemJsonBodies[i] : "{}";
-                results.Add($@"{{""index"":{i},""statusCode"":200,""etag"":""\""etag-{i}\"""",""resourceBody"":{body}}}");
             }
 
             return $@"{{""operationResponses"":[{string.Join(",", results)}]}}";

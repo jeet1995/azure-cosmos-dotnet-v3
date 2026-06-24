@@ -16,7 +16,7 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
     using PartitionKey = Cosmos.PartitionKey;
 
     /// <summary>
-    /// HYBRID fault-injection end-to-end tests for Distributed Transactions (DTX/DTC).
+    /// HYBRID fault-injection end-to-end tests for WRITE Distributed Transactions (DTX/DTC).
     ///
     /// The pattern these tests validate is the genuine fault-injection contract: a fault is
     /// injected at the transport layer (below <c>RetryHandler</c>) for the first N attempts via the
@@ -36,7 +36,7 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
     /// To run locally:
     ///     set COSMOS_DTX_ENDPOINT=https://your-account.documents.azure.com:443/
     ///     set COSMOS_DTX_KEY=your-master-key
-    ///     dotnet test --filter "FullyQualifiedName~DistributedTransactionFaultInjectionE2ETests"
+    ///     dotnet test --filter "FullyQualifiedName~DistributedWriteTransactionFaultInjectionE2ETests"
     ///
     /// This class runs in the "DistributedTransaction" test category and is NOT gated with
     /// [Ignore]. It requires the COSMOS_DTX_ENDPOINT / COSMOS_DTX_KEY environment variables
@@ -47,10 +47,10 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
     [TestClass]
     [DoNotParallelize]
     [TestCategory("DistributedTransaction")]
-    public class DistributedTransactionFaultInjectionE2ETests
+    public class DistributedWriteTransactionFaultInjectionE2ETests
     {
-        private const string DatabaseId = "DtxFaultInjectionE2ETestDb";
-        private const string ContainerId = "DtxFaultInjectionE2ETestContainer";
+        private const string DatabaseId = "DtxWriteFaultInjectionE2ETestDb";
+        private const string ContainerId = "DtxWriteFaultInjectionE2ETestContainer";
         private const string PartitionKeyPath = "/pk";
 
         private CosmosClient bootstrapClient;
@@ -722,119 +722,6 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
 
         #endregion
 
-        #region Read Transaction Fault Injection Tests
-
-        /// <summary>
-        /// READ DTx hybrid: inject a single retriable server error on the
-        /// <see cref="FaultInjectionOperationType.DistributedReadTransaction"/> request, then
-        /// assert the SDK retried AND the read transaction ultimately returned 200 from the real
-        /// Coordinator.
-        /// </summary>
-        [DataTestMethod]
-        [DataRow(FaultInjectionServerErrorType.Gone)]
-        [DataRow(FaultInjectionServerErrorType.ServiceUnavailable)]
-        [DataRow(FaultInjectionServerErrorType.TooManyRequests)]
-        [DataRow(FaultInjectionServerErrorType.Timeout)]
-        public async Task ReadTransaction_RetriableServerError_RetriesThenSucceedsAgainstRealCoordinator(
-            FaultInjectionServerErrorType errorType)
-        {
-            ToDoActivity doc = await this.SeedItemAsync(this.bootstrapContainer);
-
-            string ruleId = $"dtx-read-{errorType}-{Guid.NewGuid():N}";
-            FaultInjectionRule rule = new FaultInjectionRuleBuilder(
-                id: ruleId,
-                condition: new FaultInjectionConditionBuilder()
-                    .WithConnectionType(FaultInjectionConnectionType.Gateway)
-                    .WithOperationType(FaultInjectionOperationType.DistributedReadTransaction)
-                    .Build(),
-                result: FaultInjectionResultBuilder.GetResultBuilder(errorType)
-                    .WithTimes(1)
-                    .Build())
-                .WithDuration(TimeSpan.FromMinutes(5))
-                .Build();
-
-            using CosmosClient fiClient = this.CreateFaultInjectedClient(rule, out _);
-            Container fiContainer = fiClient.GetContainer(DatabaseId, ContainerId);
-
-            DistributedTransactionResponse response = await fiClient
-                .CreateDistributedReadTransaction()
-                .ReadItem(fiContainer, new PartitionKey(doc.pk), doc.id)
-                .CommitTransactionAsync(CancellationToken.None);
-
-            Assert.IsTrue(
-                rule.GetHitCount() >= 1,
-                $"[{errorType}] FaultInjection rule should have been hit at least once. Hit count: {rule.GetHitCount()}.");
-
-            Assert.AreEqual(
-                HttpStatusCode.OK,
-                response.StatusCode,
-                $"[{errorType}] After the injected fault was exhausted, the retried read transaction " +
-                $"should return 200 from the real Coordinator. Got: {response.StatusCode} (hit count {rule.GetHitCount()}).");
-            Assert.IsTrue(response.Count > 0);
-            Assert.AreEqual(
-                HttpStatusCode.OK,
-                response[0].StatusCode,
-                $"[{errorType}] Per-op[0] should be 200 OK. Got: {response[0].StatusCode}.");
-
-            response.Dispose();
-        }
-
-        /// <summary>
-        /// READ DTx hit by a CLIENT-PERCEIVED RESPONSE timeout: a ResponseDelay longer than the
-        /// client's RequestTimeout makes the first read attempt give up waiting for the Coordinator
-        /// response (a retriable 408); the idempotent retry then returns 200 from the real Coordinator.
-        /// </summary>
-        [TestMethod]
-        public async Task ReadTransaction_ClientPerceivedResponseTimeout_RetriesThenSucceedsAgainstRealCoordinator()
-        {
-            ToDoActivity doc = await this.SeedItemAsync(this.bootstrapContainer);
-
-            // Delay (20s) exceeds the client RequestTimeout (5s); WithTimes(1) faults a single
-            // attempt. The request IS sent, but the read is idempotent so the retried read is safe.
-            TimeSpan injectedDelay = TimeSpan.FromSeconds(20);
-            TimeSpan requestTimeout = TimeSpan.FromSeconds(5);
-
-            string ruleId = $"dtx-read-respto-{Guid.NewGuid():N}";
-            FaultInjectionRule rule = new FaultInjectionRuleBuilder(
-                id: ruleId,
-                condition: new FaultInjectionConditionBuilder()
-                    .WithConnectionType(FaultInjectionConnectionType.Gateway)
-                    .WithOperationType(FaultInjectionOperationType.DistributedReadTransaction)
-                    .Build(),
-                result: FaultInjectionResultBuilder.GetResultBuilder(FaultInjectionServerErrorType.ResponseDelay)
-                    .WithDelay(injectedDelay)
-                    .WithTimes(1)
-                    .Build())
-                .WithDuration(TimeSpan.FromMinutes(5))
-                .Build();
-
-            using CosmosClient fiClient = this.CreateFaultInjectedClient(rule, requestTimeout, out _);
-            Container fiContainer = fiClient.GetContainer(DatabaseId, ContainerId);
-
-            DistributedTransactionResponse response = await fiClient
-                .CreateDistributedReadTransaction()
-                .ReadItem(fiContainer, new PartitionKey(doc.pk), doc.id)
-                .CommitTransactionAsync(CancellationToken.None);
-
-            Assert.IsTrue(
-                rule.GetHitCount() >= 1,
-                $"The response timeout should have faulted at least one attempt. Hit count: {rule.GetHitCount()}.");
-            Assert.AreEqual(
-                HttpStatusCode.OK,
-                response.StatusCode,
-                $"After the injected response timeout was exhausted, the retried read transaction " +
-                $"should return 200 from the real Coordinator. Got: {response.StatusCode} (hit count {rule.GetHitCount()}).");
-            Assert.IsTrue(response.Count > 0);
-            Assert.AreEqual(
-                HttpStatusCode.OK,
-                response[0].StatusCode,
-                $"Per-op[0] should be 200 OK. Got: {response[0].StatusCode}.");
-
-            response.Dispose();
-        }
-
-        #endregion
-
         // ─── Helpers ───────────────────────────────────────────────────────────────────────
 
         // Builds a CosmosClient (endpoint + master key, Gateway/Session) wired with the supplied
@@ -939,12 +826,6 @@ namespace Microsoft.Azure.Cosmos.SDK.EmulatorTests
                 .Build();
 
             return this.CreateFaultInjectedClient(rule, out _);
-        }
-        private async Task<ToDoActivity> SeedItemAsync(Container targetContainer)
-        {
-            ToDoActivity doc = ToDoActivity.CreateRandomToDoActivity();
-            await targetContainer.CreateItemAsync(doc, new PartitionKey(doc.pk));
-            return doc;
         }
     }
 }
